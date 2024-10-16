@@ -28,6 +28,7 @@ from great_expectations.checkpoint.util import (
     send_opsgenie_alert,
     send_slack_notification,
     send_sns_notification,
+    send_datahub_notification,
 )
 from great_expectations.compatibility.pydantic import (
     BaseModel,
@@ -842,6 +843,19 @@ class APINotificationAction(ValidationAction):
             "validation_results": validation_results_serializable,
         }
 
+class DatahubNotificationAction(ValidationAction):
+    type: Literal["datahub"] = "datahub"
+
+    server_url: str
+    access_token: str
+    urn: str
+
+    @override
+    def run(
+        self, checkpoint_result: CheckpointResult, action_context: ActionContext | None = None
+    ) -> dict:
+        send_datahub_notification(server_url=self.server_url, access_token=self.access_token, validation_results=checkpoint_result.run_results, urn=self.urn)
+        return {}
 
 CheckpointAction = Annotated[
     Union[
@@ -852,6 +866,7 @@ CheckpointAction = Annotated[
         SlackNotificationAction,
         SNSNotificationAction,
         UpdateDataDocsAction,
+        DatahubNotificationAction
     ],
     Field(discriminator="type"),
 ]

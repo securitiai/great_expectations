@@ -6,6 +6,13 @@ import smtplib
 import ssl
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from dataclasses import dataclass
+from hashlib import md5
+from datetime import timezone
+import time
+from decimal import Decimal
+import urllib.parse
+from typing import Optional, Dict, Any
 
 import requests
 
@@ -203,3 +210,425 @@ def send_sns_notification(
         return error_msg
     else:
         return f"Successfully posted results to {response['MessageId']} with Subject {sns_subject}"
+
+def send_datahub_notification(
+        server_url: str, access_token: str, validation_results, urn: str, **kwargs
+) -> str:
+    """
+    Send JSON results to a DataHub server with a schema of:
+
+    :param server_url:  The DataHub server URL to publish messages to
+    :param access_token:  The access token to authenticate with
+    :param validation_results:  The results of the validation ran
+    :param urn:  The urn of the asset that was validated
+    :param kwargs:  Keyword arguments to pass to the requests.post method
+
+    :return:  Message ID that was published or error message
+
+    """
+    if len(list(validation_results.keys())) > 0:
+        validation_result_obj = validation_results.get(list(validation_results.keys())[0])
+    else:
+        return "No validation results found"
+
+    mcp_format = f""
+
+
+    suite_name = validation_result_obj["suite_name"]
+    run_id = validation_result_obj.meta.get("run_id")
+    data_platform_instance = 'urn:li:dataPlatform:great-expectations'
+    active_batch_definition = validation_result_obj.meta.get("active_batch_definition")
+
+    for result in validation_result_obj.results:
+        expectation_config = result["expectation_config"]
+        expectation_type = expectation_config["type"]
+        success = bool(result["success"])
+
+        kwargs = {
+            k: v for k, v in expectation_config["kwargs"].items() if k != "batch_id"
+        }
+
+        result = result["result"]
+        assertion_dataset = urn
+        if "column" in kwargs:
+            assertion_field = create_datahub_assertion_field_urn(urn, kwargs["column"])
+        else:
+            assertion_field = None
+
+        assertion_urn = create_datahub_assertion_urn(
+            datahub_guid(
+                {
+                    "platform": "great-expectations",
+                    "nativeType": expectation_type,
+                    "nativeParameters": kwargs,
+                    "dataset": urn,
+                    "fields": [assertion_field],
+                }
+            )
+        )
+
+        fields = [assertion_field] if assertion_field else []
+
+        assertionInfo = get_assertion_info(
+            expectation_type,
+            kwargs,
+            assertion_dataset,
+            fields,
+            suite_name
+        )
+
+        run_time = run_id.run_time.astimezone(timezone.utc)
+
+        nativeResults = {
+            k: convert_to_string(v)
+            for k, v in result.items()
+            if (
+                    k
+                    in [
+                        "observed_value",
+                        "partial_unexpected_list",
+                        "partial_unexpected_counts",
+                        "details",
+                    ]
+                    and v
+            )
+        }
+
+        assertionResult = {
+            "timestampMillis": int(round(time.time() * 1000)),
+            "assertionUrn": assertion_urn,
+            "asserteeUrn": urn,
+            "runId": run_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "result": {
+                "type": "SUCCESS" if success else "FAILURE",
+                "rowCount": 0 if result.get("element_count") is None else result.get("element_count"),
+                "missingCount": 0 if result.get("missing_count") is None else int(result.get("missing_count")),
+                "unexpectedCount": 0 if result.get("unexpected_count") is None else int(result.get("unexpected_count")),
+                "nativeResults": nativeResults,
+            },
+            "batchSpec": {
+                "customProperties": {
+                    "data_asset_name": active_batch_definition["data_asset_name"],
+                    "datasource_name": active_batch_definition["datasource_name"],
+                }
+            },
+            "status": "COMPLETE",
+            "runtimeContext": {}
+        }
+
+        assertion_results = [assertionResult]
+
+        assertion_with_results = [{
+            "assertionUrn": assertion_urn,
+            "assertionInfo": assertionInfo,
+            "assertionPlatform": data_platform_instance,
+            "assertionResults": assertion_results
+        }]
+
+        for assertion in assertion_with_results:
+            assertion_info_data = {
+                "entityUrn": assertion["assertionUrn"],
+                "aspectName": "assertionInfo",
+                "entityType": "assertion",
+                "changeType": "UPSERT",
+                "aspect": {
+                    "contentType": "application/json",
+                    "value": json.dumps(assertion["assertionInfo"]),
+                }
+            }
+            emit_mcp(server_url, access_token, assertion_info_data)
+
+            assertion_data = {
+                "entityUrn": assertion["assertionUrn"],
+                "entityType": "assertion",
+                "aspectName": "dataPlatformInstance",
+                "changeType": "UPSERT",
+                "aspect": {
+                    "contentType": "application/json",
+                    "value": json.dumps({"platform": assertion["assertionPlatform"]}),
+                }
+            }
+            emit_mcp(server_url, access_token, assertion_data)
+            #
+            for assertion_result in assertion["assertionResults"]:
+
+                assertion_result_data = {
+                    "entityUrn": assertion_result["assertionUrn"],
+                    "aspectName": "assertionRunEvent",
+                    "entityType": "assertion",
+                    "changeType": "UPSERT",
+                    "aspect": {
+                        "contentType": "application/json",
+                        "value": json.dumps(assertion_result),
+                    }
+                }
+                emit_mcp(server_url, access_token, assertion_result_data)
+
+
+def get_assertion_info(expectation_type, kwargs, dataset, fields, expectation_suite_name):
+    def get_min_max(kwargs, type="UNKNOWN"):
+        return {
+            "minValue": {
+                "value": convert_to_string(kwargs.get("min_value")),
+                "type": type,
+            },
+            "maxValue": {
+                "value": convert_to_string(kwargs.get("max_value")),
+                "type": type,
+            },
+        }
+
+    known_expectations: Dict[str, DataHubStdAssertion] = {
+        # column aggregate expectations
+        "expect_column_min_to_be_between": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="BETWEEN",
+            aggregation="MIN",
+            parameters=get_min_max(kwargs),
+        ),
+        "expect_column_max_to_be_between": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="BETWEEN",
+            aggregation="MAX",
+            parameters=get_min_max(kwargs),
+        ),
+        "expect_column_median_to_be_between": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="BETWEEN",
+            aggregation="MEDIAN",
+            parameters=get_min_max(kwargs),
+        ),
+        "expect_column_stdev_to_be_between": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="BETWEEN",
+            aggregation="STDDEV",
+            parameters=get_min_max(kwargs, "NUMBER"),
+        ),
+        "expect_column_mean_to_be_between": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="BETWEEN",
+            aggregation="MEAN",
+            parameters=get_min_max(kwargs, "NUMBER"),
+        ),
+        "expect_column_unique_value_count_to_be_between": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="BETWEEN",
+            aggregation="UNIQUE_COUNT",
+            parameters=get_min_max(kwargs, "NUMBER"),
+        ),
+        "expect_column_proportion_of_unique_values_to_be_between": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="BETWEEN",
+            aggregation="UNIQUE_PROPOTION",
+            parameters=get_min_max(kwargs, "NUMBER"),
+        ),
+        "expect_column_sum_to_be_between": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="BETWEEN",
+            aggregation="SUM",
+            parameters=get_min_max(kwargs, "NUMBER"),
+        ),
+        "expect_column_quantile_values_to_be_between": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="BETWEEN",
+            aggregation="_NATIVE_",
+        ),
+        # column map expectations
+        "expect_column_values_to_not_be_null": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="NOT_NULL",
+            aggregation="IDENTITY",
+        ),
+        "expect_column_values_to_be_in_set": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="IN",
+            aggregation="IDENTITY",
+            parameters={
+                "value": {
+                    "value": convert_to_string(kwargs.get("value_set")),
+                    "type": "SET"
+                }
+            }
+        ),
+        "expect_column_values_to_be_between": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="BETWEEN",
+            aggregation="IDENTITY",
+            parameters=get_min_max(kwargs),
+        ),
+        "expect_column_values_to_match_regex": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="REGEX_MATCH",
+            aggregation="IDENTITY",
+            parameters={
+                "value": {
+                    "value": kwargs.get("regex"),
+                    "type": "STRING"
+                }
+            }
+        ),
+        "expect_column_values_to_match_regex_list": DataHubStdAssertion(
+            scope="DATASET_COLUMN",
+            operator="REGEX_MATCH",
+            aggregation="IDENTITY",
+            parameters={
+                "value": {
+                    "value": convert_to_string(kwargs.get("regex_list")),
+                    "type": "LIST"
+                }
+            }
+        ),
+        "expect_table_columns_to_match_ordered_list": DataHubStdAssertion(
+            scope="DATASET_SCHEMA",
+            operator="EQUAL_TO",
+            aggregation="COLUMNS",
+            parameters={
+                "value": {
+                    "value": convert_to_string(kwargs.get("column_list")),
+                    "type": "LIST"
+                }
+            }
+        ),
+        "expect_table_columns_to_match_set": DataHubStdAssertion(
+            scope="DATASET_SCHEMA",
+            operator="EQUAL_TO",
+            aggregation="COLUMNS",
+            parameters={
+                "value": {
+                    "value": convert_to_string(kwargs.get("column_set")),
+                    "type": "SET"
+                }
+            }
+        ),
+        "expect_table_column_count_to_be_between": DataHubStdAssertion(
+            scope="DATASET_SCHEMA",
+            operator="BETWEEN",
+            aggregation="COLUMN_COUNT",
+            parameters=get_min_max(kwargs, "NUMBER"),
+        ),
+        "expect_table_column_count_to_equal": DataHubStdAssertion(
+            scope="DATASET_SCHEMA",
+            operator="EQUAL_TO",
+            aggregation="COLUMN_COUNT",
+            parameters={
+                "value": {
+                    "value": convert_to_string(kwargs.get("value")),
+                    "type": "NUMBER"
+                }
+            }
+        ),
+        "expect_column_to_exist": DataHubStdAssertion(
+            scope="DATASET_SCHEMA",
+            operator="_NATIVE_",
+            aggregation="_NATIVE_",
+        ),
+        "expect_table_row_count_to_equal": DataHubStdAssertion(
+            scope="DATASET_ROWS",
+            operator="EQUAL_TO",
+            aggregation="ROW_COUNT",
+            parameters={
+                "value": {
+                    "value": convert_to_string(kwargs.get("value")),
+                    "type": "NUMBER"
+                }
+            }
+        ),
+        "expect_table_row_count_to_be_between": DataHubStdAssertion(
+            scope="DATASET_ROWS",
+            operator="BETWEEN",
+            aggregation="ROW_COUNT",
+            parameters=get_min_max(kwargs, "NUMBER"),
+        ),
+    }
+
+    data_assertion_info = {
+        "dataset": dataset,
+        "fields": fields,
+        "operator": "_NATIVE_",
+        "aggregation": "_NATIVE_",
+        "nativeType": expectation_type,
+        "nativeParameters": {k: convert_to_string(v) for k, v in kwargs.items()},
+        "scope": "DATASET_ROWS"
+    }
+
+    if expectation_type in known_expectations.keys():
+        assertion = known_expectations[expectation_type]
+        data_assertion_info["scope"] = assertion.scope
+        data_assertion_info["aggregation"] = assertion.aggregation
+        data_assertion_info["operator"] = assertion.operator
+
+    else:
+        if "column" in kwargs and expectation_type.startswith(
+                "expect_column_value"
+        ):
+            data_assertion_info.scope = "DATASET_COLUMN"
+            data_assertion_info.aggregation = "IDENTITY"
+        elif "column" in kwargs:
+            data_assertion_info.scope = "DATASET_COLUMN"
+            data_assertion_info.aggregation = "_NATIVE_"
+
+    return {
+        "type": "DATASET",
+        "datasetAssertion": data_assertion_info,
+        "customProperties": {"expectation_suite_name": expectation_suite_name}
+    }
+
+def create_datahub_assertion_field_urn(dataset_urn: str, field_path: str) -> str:
+    return f"urn:li:schemaField:({dataset_urn},{str_encoder(field_path)})"
+
+
+def create_datahub_assertion_urn(assertion_id: str) -> str:
+    return f"urn:li:assertion:{assertion_id}"
+
+
+def datahub_guid(obj: dict) -> str:
+    obj_str = json.dumps(
+        obj
+    ).encode("utf-8")
+    return md5(obj_str).hexdigest()
+
+
+class DecimalEncoder(json.JSONEncoder):
+    def default(self, o):
+        if isinstance(o, Decimal):
+            return str(o)
+        return super(DecimalEncoder, self).default(o)
+
+
+def convert_to_string(var: Any) -> str:
+    try:
+        tmp = (
+            str(var)
+            if isinstance(var, (str, int, float))
+            else json.dumps(var, cls=DecimalEncoder)
+        )
+    except TypeError as e:
+        logger.debug(e)
+        tmp = str(var)
+    return tmp
+
+
+def str_encoder(urn: str) -> str:
+    return urllib.parse.quote(urn)
+
+
+def emit_mcp(gms_url: str, access_token: str, data):
+    url = f"{gms_url}/aspects?action=ingestProposal"
+
+    payload = json.dumps({"proposal": data})
+    header = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    response = requests.post(url=url, headers=header, data=payload)
+    if response.status_code != 200:
+        print(f"Failed to emit MCP event. status_code: {response.status_code}, message: {response.reason}, payload: {payload}")
+
+
+@dataclass
+class DataHubStdAssertion:
+    scope: str
+    operator: str
+    aggregation: str
+    parameters: Optional[object] = None
