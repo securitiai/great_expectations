@@ -23,7 +23,10 @@ class ExpectValueToMatchCustomQueryOutput(QueryExpectation):
     expect_value_to_match_custom_query_output is a *column aggregate expectation*.
 
     Args:
-        value (int): The expected value of the query output.
+        input_structure = {
+            urn: string,
+            pass_fail_column: string
+        }
 
     Keyword Args:
         query (str): The SQL query to run. This query should return a single value.
@@ -41,12 +44,13 @@ class ExpectValueToMatchCustomQueryOutput(QueryExpectation):
         An ExpectationSuiteValidationResult
 
     Notes:
-        * The query should return a single value.
         * The query should be written in SQL.
-        * The query should be written to return a single value. If the query returns multiple values, only the
-          first value will be used.
+        * The query should be written to return columns that are sent in the arguments. If any column is missing from
+          result set, 'Fail' status will be returned
         * The query should be written to return a single row. If the query returns multiple rows, only the first
           row will be used.
+        * The values returned under the pass_fail columns should be 'Pass' or 'Fail'. If anything else is received, the
+          result will be recorded as 'Fail'
         * The result_format parameter is not currently used, but will be used in a future version of this
           expectation.
         * The include_config parameter is not currently used, but will be used in a future version of this
@@ -78,23 +82,20 @@ class ExpectValueToMatchCustomQueryOutput(QueryExpectation):
     ) -> Union[ExpectationValidationResult, dict]:
         configuration = self.configuration
         metrics = convert_to_json_serializable(data=metrics)
-        query_result = list(metrics.get("query.table")[0].values())[0]
+        query_result = metrics.get("query.table")[0]
 
-        query_result_size = len(list(metrics.get("query.table")[0].values()))
-        values = configuration["kwargs"].get("value")
+        values = configuration["kwargs"].get("values")
 
         success = True
 
-        if len(values) != query_result_size:
-            success = False
-
-        i = 0
-        while i < query_result_size:
-            if query_result[i] != values[i]:
+        for val in values:
+            if val['pass_fail_column'] not in list(query_result.keys()):
                 success = False
                 break
-            i += 1
-
+            result = query_result[val['pass_fail_column']]
+            if result != 'Pass':
+                success = False
+                break
 
         return {
             "success": success,
