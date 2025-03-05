@@ -8,6 +8,7 @@ from .actions import (
     SNSNotificationAction,
     UpdateDataDocsAction,
     ValidationAction,
+    DatahubNotificationAction,
 )
 from .checkpoint import Checkpoint
 
