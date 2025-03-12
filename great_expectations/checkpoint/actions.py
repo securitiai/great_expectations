@@ -111,7 +111,7 @@ class ValidationAction(BaseModel):
     """  # noqa: E501
 
     class Config:
-        extra = Extra.forbid
+        extra = Extra.allow
         arbitrary_types_allowed = True
         # Due to legacy pattern of instantiate_class_from_config, we need a custom serializer
         json_encoders = {Renderer: lambda r: r.serialize()}

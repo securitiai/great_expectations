@@ -122,7 +122,7 @@ class Checkpoint(BaseModel):
         }
         """  # noqa: E501
 
-        extra = Extra.forbid
+        extra = Extra.allow
         arbitrary_types_allowed = (
             True  # Necessary for compatibility with ValidationAction's Marshmallow dep
         )
@@ -444,7 +444,7 @@ class CheckpointResult(BaseModel):
     success: Optional[bool] = None
 
     class Config:
-        extra = Extra.forbid
+        extra = Extra.allow
         arbitrary_types_allowed = True
 
     @root_validator
