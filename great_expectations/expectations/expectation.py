@@ -288,7 +288,7 @@ class Expectation(pydantic.BaseModel, metaclass=MetaExpectation):
     class Config:
         arbitrary_types_allowed = True
         smart_union = True
-        extra = pydantic.Extra.forbid
+        extra = pydantic.Extra.allow
         json_encoders = {RenderedAtomicContent: lambda data: data.to_json_dict()}
 
         @staticmethod
