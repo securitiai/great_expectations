@@ -59,7 +59,6 @@ LOGGER: Final[logging.Logger] = logging.getLogger(__name__)
 
 REQUIRED_QUERY_PARAMS: Final[Iterable[str]] = {  # errors will be thrown if any of these are missing
     "warehouse",
-    "role",
 }
 
 MISSING: Final = object()  # sentinel value to indicate missing values
