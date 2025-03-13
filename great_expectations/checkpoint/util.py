@@ -561,11 +561,11 @@ def get_assertion_info(expectation_type, kwargs, dataset, fields, expectation_su
         if "column" in kwargs and expectation_type.startswith(
                 "expect_column_value"
         ):
-            data_assertion_info.scope = "DATASET_COLUMN"
-            data_assertion_info.aggregation = "IDENTITY"
+            data_assertion_info["scope"] = "DATASET_COLUMN"
+            data_assertion_info["aggregation"] = "IDENTITY"
         elif "column" in kwargs:
-            data_assertion_info.scope = "DATASET_COLUMN"
-            data_assertion_info.aggregation = "_NATIVE_"
+            data_assertion_info["scope"] = "DATASET_COLUMN"
+            data_assertion_info["aggregation"] = "_NATIVE_"
 
     return {
         "type": "DATASET",
