@@ -363,6 +363,8 @@ class ExpectationValidationResult(SerializableDictDot):
         }
         if self.exception_info.get("raised_exception"):
             describe_dict["exception_info"] = self.exception_info
+        elif len(self.exception_info.keys()) == 1:
+            describe_dict["exception_info"] = list(self.exception_info.values())[0]
         return describe_dict
 
     @public_api
