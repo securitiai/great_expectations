@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import copy
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -886,8 +887,9 @@ class DatahubNotificationAction(ValidationAction):
                                         urn_success = observed_value[pass_fail_column] == "Pass"
                                     
                                     # Create a modified validation result with just this URN's result
-                                    urn_validation_result = validation_result.copy()
-                                    urn_result = result.copy()
+                                    # Use deepcopy for proper copying of complex objects
+                                    urn_validation_result = copy.deepcopy(validation_result)
+                                    urn_result = copy.deepcopy(result)
                                     urn_result["success"] = urn_success
                                     
                                     # Replace the results with just this one result
