@@ -885,6 +885,9 @@ class DatahubNotificationAction(ValidationAction):
                                     
                                     if pass_fail_column in observed_value:
                                         urn_success = observed_value[pass_fail_column] == "Pass"
+                                        print("pass_fail_column: " + pass_fail_column + " found. Value set: " + urn_success)
+                                    else:
+                                        print("pass_fail_column: " + pass_fail_column + " not found in observed_value: " + observed_value)
                                     
                                     # Create a modified validation result with just this URN's result
                                     # Use deepcopy for proper copying of complex objects
