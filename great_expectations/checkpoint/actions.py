@@ -885,7 +885,7 @@ class DatahubNotificationAction(ValidationAction):
                                     
                                     if pass_fail_column in observed_value:
                                         urn_success = observed_value[pass_fail_column] == "Pass"
-                                        print("pass_fail_column: " + pass_fail_column + " found. Value set: " + str(urn_success))
+                                        print("pass_fail_column: " + pass_fail_column + " found. Value set: " + str(urn_success) + " observed_value: " + str(observed_value[pass_fail_column]))
                                     else:
                                         print("pass_fail_column: " + pass_fail_column + " not found in observed_value: " + observed_value)
                                     
