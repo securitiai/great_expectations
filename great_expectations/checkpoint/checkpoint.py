@@ -466,7 +466,9 @@ class CheckpointResult(BaseModel):
         run_result_descriptions = [r.describe_dict() for r in self.run_results.values()]
         num_results = len(run_result_descriptions)
 
-        table_name = self.checkpoint_config.dict().get("table_name")
+        table_name = ""
+        if "table_name" in self.checkpoint_config.dict().keys():
+            table_name = str(self.checkpoint_config.dict().get("table_name"))
 
         return {
             "success": success_count == num_results,
@@ -494,6 +496,7 @@ class CheckpointDescriptionDict(TypedDict):
     success: bool
     statistics: CheckpointDescriptionStatistics
     validation_results: List[Dict[str, Any]]
+    table_name: str
 
 
 class CheckpointDescriptionStatistics(TypedDict):
