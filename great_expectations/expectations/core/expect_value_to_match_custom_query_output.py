@@ -82,7 +82,13 @@ class ExpectValueToMatchCustomQueryOutput(QueryExpectation):
     ) -> Union[ExpectationValidationResult, dict]:
         configuration = self.configuration
         metrics = convert_to_json_serializable(data=metrics)
-        query_result = metrics.get("query.table")[0]
+        if len(metrics.get("query.table")) > 0:
+            query_result = metrics.get("query.table")[0]
+        else:
+            return{
+                "success": False,
+                "result" : {"observed_value": {}}
+            }
 
         values = configuration["kwargs"].get("values")
 
