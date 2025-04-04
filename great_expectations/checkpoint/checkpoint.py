@@ -466,6 +466,8 @@ class CheckpointResult(BaseModel):
         run_result_descriptions = [r.describe_dict() for r in self.run_results.values()]
         num_results = len(run_result_descriptions)
 
+        table_name = self.checkpoint_config.dict().get("table_name")
+
         return {
             "success": success_count == num_results,
             "statistics": {
@@ -475,6 +477,7 @@ class CheckpointResult(BaseModel):
                 "unsuccessful_validations": num_results - success_count,
             },
             "validation_results": run_result_descriptions,
+            "table_name": table_name
         }
 
     @public_api
