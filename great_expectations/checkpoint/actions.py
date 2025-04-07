@@ -112,6 +112,7 @@ class ValidationAction(BaseModel):
     """  # noqa: E501
 
     class Config:
+        # We are allowing extra fields because we are adding fields to the config to match them to Privaci related fields when response is sent back
         extra = Extra.allow
         arbitrary_types_allowed = True
         # Due to legacy pattern of instantiate_class_from_config, we need a custom serializer

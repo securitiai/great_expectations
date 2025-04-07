@@ -122,6 +122,7 @@ class Checkpoint(BaseModel):
         }
         """  # noqa: E501
 
+        # We are allowing extra fields because we are adding fields to the config to match them to Privaci related fields when response is sent back
         extra = Extra.allow
         arbitrary_types_allowed = (
             True  # Necessary for compatibility with ValidationAction's Marshmallow dep
@@ -444,6 +445,7 @@ class CheckpointResult(BaseModel):
     success: Optional[bool] = None
 
     class Config:
+        # We are allowing extra fields because we are adding fields to the config to match them to Privaci related fields when response is sent back
         extra = Extra.allow
         arbitrary_types_allowed = True
 
