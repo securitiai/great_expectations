@@ -468,6 +468,7 @@ class CheckpointResult(BaseModel):
         run_result_descriptions = [r.describe_dict() for r in self.run_results.values()]
         num_results = len(run_result_descriptions)
 
+        # Going to add table_name into response so that we can pick it up in Privaci side when response is sent back
         table_name = ""
         if "table_name" in self.checkpoint_config.dict().keys():
             table_name = str(self.checkpoint_config.dict().get("table_name"))
