@@ -288,6 +288,7 @@ class Expectation(pydantic.BaseModel, metaclass=MetaExpectation):
     class Config:
         arbitrary_types_allowed = True
         smart_union = True
+        # We are allowing extra fields because we are adding fields to the config to match them to Privaci related fields when response is sent back
         extra = pydantic.Extra.allow
         json_encoders = {RenderedAtomicContent: lambda data: data.to_json_dict()}
 
