@@ -122,7 +122,8 @@ class Checkpoint(BaseModel):
         }
         """  # noqa: E501
 
-        extra = Extra.forbid
+        # We are allowing extra fields because we are adding fields to the config to match them to Privaci related fields when response is sent back
+        extra = Extra.allow
         arbitrary_types_allowed = (
             True  # Necessary for compatibility with ValidationAction's Marshmallow dep
         )
@@ -444,7 +445,8 @@ class CheckpointResult(BaseModel):
     success: Optional[bool] = None
 
     class Config:
-        extra = Extra.forbid
+        # We are allowing extra fields because we are adding fields to the config to match them to Privaci related fields when response is sent back
+        extra = Extra.allow
         arbitrary_types_allowed = True
 
     @root_validator
@@ -466,6 +468,11 @@ class CheckpointResult(BaseModel):
         run_result_descriptions = [r.describe_dict() for r in self.run_results.values()]
         num_results = len(run_result_descriptions)
 
+        # Going to add table_name into response so that we can pick it up in Privaci side when response is sent back
+        table_name = ""
+        if "table_name" in self.checkpoint_config.dict().keys():
+            table_name = str(self.checkpoint_config.dict().get("table_name"))
+
         return {
             "success": success_count == num_results,
             "statistics": {
@@ -475,6 +482,7 @@ class CheckpointResult(BaseModel):
                 "unsuccessful_validations": num_results - success_count,
             },
             "validation_results": run_result_descriptions,
+            "table_name": table_name
         }
 
     @public_api
@@ -491,6 +499,7 @@ class CheckpointDescriptionDict(TypedDict):
     success: bool
     statistics: CheckpointDescriptionStatistics
     validation_results: List[Dict[str, Any]]
+    table_name: str
 
 
 class CheckpointDescriptionStatistics(TypedDict):

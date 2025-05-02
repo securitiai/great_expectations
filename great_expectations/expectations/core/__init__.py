@@ -99,3 +99,4 @@ from .expect_table_row_count_to_equal_other_table import (
     ExpectTableRowCountToEqualOtherTable,
 )
 from .unexpected_rows_expectation import UnexpectedRowsExpectation
+from .expect_value_to_match_custom_query_output import ExpectValueToMatchCustomQueryOutput

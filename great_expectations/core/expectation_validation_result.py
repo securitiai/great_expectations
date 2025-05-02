@@ -363,6 +363,10 @@ class ExpectationValidationResult(SerializableDictDot):
         }
         if self.exception_info.get("raised_exception"):
             describe_dict["exception_info"] = self.exception_info
+        # Added this check because it seems like GX team has not handled certain scenarios where instead of the
+        # exception_info being a dict, it is a list of dicts. This is not the case for all exceptions
+        elif len(self.exception_info.keys()) == 1:
+            describe_dict["exception_info"] = list(self.exception_info.values())[0]
         return describe_dict
 
     @public_api

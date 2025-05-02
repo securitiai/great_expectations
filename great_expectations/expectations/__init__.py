@@ -56,4 +56,5 @@ from .core import (
     ExpectTableRowCountToEqual,
     ExpectTableRowCountToEqualOtherTable,
     UnexpectedRowsExpectation,
+    ExpectValueToMatchCustomQueryOutput,
 )
