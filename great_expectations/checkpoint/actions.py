@@ -865,14 +865,14 @@ class DatahubNotificationAction(ValidationAction):
 
             # Process each expectation result
             for result in validation_result.results:
-                if result["exception_info"]:
-                    if isinstance(result["exception_info"], dict):
-                        for exception in result["exception_info"].values():
-                            if isinstance(exception, dict):
-                                if exception["raised_exception"]:
-                                    if exception["exception_message"]:
-                                        print(f"Exception in expectation: ", str(exception["exception_message"]))
-                    continue
+                exception_info = result.get("exception_info")
+                if exception_info and isinstance(exception_info, dict):
+                    for exception in exception_info.values():
+                        if (isinstance(exception, dict) and 
+                            exception.get("raised_exception") and 
+                            exception.get("exception_message")):
+                            print(f"Exception in expectation: {exception['exception_message']}")
+                            continue
                 expectation_config = result["expectation_config"]
                 expectation_type = expectation_config["type"]
                 kwargs = expectation_config["kwargs"]
