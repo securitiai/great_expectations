@@ -288,6 +288,32 @@ class Checkpoint(BaseModel):
             else:
                 diagnostics.raise_for_error()
 
+        table_name = self.validation_definitions[0].data.data_asset.table_name
+        schema_name = self.validation_definitions[0].data.data_asset.schema_name
+
+        # For PostgresQL, we need to handle quoting correctly
+        if self.validation_definitions[0].data.data_asset.datasource.type == 'postgres':
+            # Add quotes to table and schema names if they don't already have quotes
+
+            # Check if table_name already has quotes of any kind
+            # Do not add quotes if it already has any kind of quotes
+            is_table_quoted = (table_name.startswith('"') and table_name.endswith('"')) or \
+                              (table_name.startswith('"""') and table_name.endswith('"""'))
+
+            if not is_table_quoted:
+                # Only add quotes if it doesn't already have quotes
+                quoted_table_name = f'"{table_name}"'
+                self.validation_definitions[0].data.data_asset.set_table_name(quoted_table_name)
+
+            # Check if schema_name already has quotes of any kind
+            is_schema_quoted = (schema_name.startswith('"') and schema_name.endswith('"')) or \
+                               (schema_name.startswith('"""') and schema_name.endswith('"""'))
+
+            if not is_schema_quoted:
+                # Only add quotes if it doesn't already have quotes
+                quoted_schema_name = f'"{schema_name}"'
+                self.validation_definitions[0].data.data_asset.set_schema_name(quoted_schema_name)
+
         run_id = run_id or RunIdentifier(run_time=dt.datetime.now(dt.timezone.utc))
         run_results = self._run_validation_definitions(
             batch_parameters=batch_parameters,

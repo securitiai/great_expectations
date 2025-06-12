@@ -311,6 +311,12 @@ class DataAsset(GenericBaseModel, Generic[DatasourceT, PartitionerT], ABC):
     def datasource(self) -> DatasourceT:
         return self._datasource
 
+    def set_table_name(self, table_name: str) -> None:
+        self.table_name = table_name
+
+    def set_schema_name(self, schema_name: str) -> None:
+        self.schema_name = schema_name
+
     def test_connection(self) -> None:
         """Test the connection for the DataAsset.
 
