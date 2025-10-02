@@ -62,7 +62,7 @@ from .expect_column_values_to_be_slug import ExpectColumnValuesToBeSlug
 from .expect_column_values_to_be_valid_arxiv_id import (
     ExpectColumnValuesToBeValidArxivId,
 )
-from .expect_column_values_to_be_valid_barcode import ExpectColumnValuesToBeValidBarcode
+# from .expect_column_values_to_be_valid_barcode import ExpectColumnValuesToBeValidBarcode
 from .expect_column_values_to_be_valid_base32 import ExpectColumnValuesToBeValidBase32
 from .expect_column_values_to_be_valid_base64 import ExpectColumnValuesToBeValidBase64
 from .expect_column_values_to_be_valid_bch_address import (
