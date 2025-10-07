@@ -862,46 +862,54 @@ class DatahubNotificationAction(ValidationAction):
             # Track the URNs we've already processed for this validation result
             processed_urns = set()
             custom_urns_found = False
-            
+
             # Process each expectation result
             for result in validation_result.results:
+                exception_info = result.get("exception_info")
+                if exception_info and isinstance(exception_info, dict):
+                    for exception in exception_info.values():
+                        if (isinstance(exception, dict) and 
+                            exception.get("raised_exception") and 
+                            exception.get("exception_message")):
+                            print(f"Exception in expectation: {exception['exception_message']}")
+                            continue
                 expectation_config = result["expectation_config"]
                 expectation_type = expectation_config["type"]
                 kwargs = expectation_config["kwargs"]
-                
+
                 # For ExpectValueToMatchCustomQueryOutput, extract URNs from values
                 if expectation_type == "expect_value_to_match_custom_query_output":
                     if "values" in kwargs and "query" in kwargs:
                         # Create a copy of the validation result for each URN with specific success status
                         observed_value = result.get("result", {}).get("observed_value", {})
-                        
+
                         for value in kwargs["values"]:
                             if "urn" in value and "pass_fail_column" in value:
                                 urn = value["urn"]
                                 pass_fail_column = value["pass_fail_column"]
-                                
+
                                 if urn not in processed_urns:
                                     # Determine success status for this specific URN based on its pass_fail_column
                                     urn_success = False
-                                    
+
                                     if pass_fail_column in observed_value:
                                         urn_success = str(observed_value[pass_fail_column]) == "Pass"
                                         print("pass_fail_column: " + pass_fail_column + " found. Value set: " + str(urn_success) + " observed_value: " + str(observed_value[pass_fail_column]))
                                     else:
-                                        print("pass_fail_column: " + str(pass_fail_column) + " not found in observed_value: " + str(observed_value))
-                                    
+                                        print("pass_fail_column: " + pass_fail_column + " not found in observed_value: " + str(observed_value))
+
                                     # Create a modified validation result with just this URN's result
                                     # Use deepcopy for proper copying of complex objects
                                     urn_validation_result = copy.deepcopy(validation_result)
                                     urn_result = copy.deepcopy(result)
                                     urn_result["success"] = urn_success
-                                    
+
                                     # Replace the results with just this one result
                                     urn_validation_result.results = [urn_result]
-                                    
+
                                     # Set the overall success based on this URN's success
                                     urn_validation_result.success = urn_success
-                                    
+
                                     send_datahub_notification(
                                         server_url=self.server_url,
                                         access_token=self.access_token,
@@ -911,7 +919,7 @@ class DatahubNotificationAction(ValidationAction):
                                     results[urn] = f"Notification sent (success: {urn_success})"
                                     processed_urns.add(urn)
                                     custom_urns_found = True
-            
+
             # If no custom URNs were processed and there is a default URN,
             # use it for the entire validation result
             if not custom_urns_found and self.urn:
