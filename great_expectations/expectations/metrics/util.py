@@ -381,13 +381,15 @@ def get_sqlalchemy_column_metadata(
                     # Implicit subquery for columns().column was deprecated in SQLAlchemy 1.4
                     # We must explicitly create a subquery
                     columns = table_selectable.columns().subquery().columns
+            elif sqlalchemy.quoted_name and isinstance(table_selectable, sqlalchemy.quoted_name):  # type: ignore[truthy-function]
+                columns = inspector.get_columns(
+                    table_name=table_selectable,
+                    schema=schema_name,
+                )
             else:
-                # TODO: remove cast to a string once [this](https://github.com/snowflakedb/snowflake-sqlalchemy/issues/157) issue is resovled  # noqa: E501
-                table_name = str(table_selectable)
-                if execution_engine.dialect_name == GXSqlDialect.SNOWFLAKE:
-                    table_name = table_name.lower()
+                logger.warning("unexpected table_selectable type")
                 columns = inspector.get_columns(  # type: ignore[assignment]
-                    table_name=table_name,
+                    table_name=str(table_selectable),
                     schema=schema_name,
                 )
         except (
