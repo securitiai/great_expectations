@@ -940,8 +940,14 @@ class TableAsset(_SQLAsset):
         try:
             with engine.connect() as connection:
                 table = sa.table(self.table_name, schema=self.schema_name)
+
+                # sa.select(1, table).limit(1) produces query like this
+                # SELECT * FROM "SPECIAL_CHAR_([{!@#$%^&*_+|:;?/,.~``}])" LIMIT %(param_1)
+                # which checks for %. It finds % in our table name and and try to escape %^ which causes exception
+                # unsupported format character '^'
+
                 # don't need to fetch any data, just want to make sure the table is accessible
-                connection.execute(sa.select(1, table).limit(1))
+                connection.execute(f'SELECT 1 FROM {self.table_name} LIMIT 1')
         except Exception as query_error:
             LOGGER.info(f"{self.name} `.test_connection()` query failed: {query_error!r}")
             raise TestConnectionError(  # noqa: TRY003
