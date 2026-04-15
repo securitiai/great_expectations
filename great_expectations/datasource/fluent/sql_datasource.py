@@ -14,6 +14,7 @@ from typing import (
     Generic,
     List,
     Literal,
+    Mapping,
     Optional,
     Protocol,
     Sequence,
@@ -79,7 +80,6 @@ from great_expectations.execution_engine.partition_and_sample.sqlalchemy_data_pa
 )
 
 if TYPE_CHECKING:
-    from sqlalchemy.sql import quoted_name  # noqa: TID251 # type-checking only
 
     from great_expectations.compatibility import sqlalchemy
     from great_expectations.core.batch_definition import BatchDefinition
@@ -91,7 +91,13 @@ if TYPE_CHECKING:
 
 LOGGER: Final[logging.Logger] = logging.getLogger(__name__)
 
-DEFAULT_QUOTE_CHARACTERS: Final[Tuple[str, str]] = ('"', "'")
+DEFAULT_INITIAL_QUOTE_CHARACTERS: Final[Tuple[str, str, str, str]] = ('"', "'", "`", "[")
+DEFAULT_FINAL_QUOTE_CHARACTERS: Final[Mapping[str, str]] = {
+    '"': '"',
+    "'": "'",
+    "`": "`",
+    "[": "]",
+}
 
 
 @overload
@@ -104,7 +110,7 @@ def to_lower_if_not_quoted(value: None, quote_characters: Sequence[str] = ...) -
 
 def to_lower_if_not_quoted(
     value: str | None,
-    quote_characters: Sequence[str] = DEFAULT_QUOTE_CHARACTERS,
+    quote_characters: Sequence[str] = DEFAULT_INITIAL_QUOTE_CHARACTERS,
 ) -> str | None:
     """
     Convert a string to lowercase if it is not enclosed in quotes.
@@ -112,7 +118,7 @@ def to_lower_if_not_quoted(
     if not value:
         return value
     for char in quote_characters:
-        if value.startswith(char) and value.endswith(char):
+        if value.startswith(char) and value.endswith(DEFAULT_FINAL_QUOTE_CHARACTERS[char]):
             LOGGER.warning(
                 f"The {value} string is bracketed by quotes,"
                 " so it will not be converted to lowercase."
@@ -616,7 +622,7 @@ class _SQLAsset(DataAsset[DatasourceT, ColumnPartitioner], Generic[DatasourceT])
         else:
             sql_partitioner = None
 
-        batch_spec_kwargs: dict[str, str | dict | None]
+        batch_spec_kwargs: Dict[str, str | dict | None]
         requests = self._fully_specified_batch_requests(batch_request)
         unsorted_metadata_dicts = [self._get_batch_metadata_from_batch_request(r) for r in requests]
 
@@ -787,7 +793,7 @@ class _SQLAsset(DataAsset[DatasourceT, ColumnPartitioner], Generic[DatasourceT])
                 f"but actually has form:\n{pf(batch_request.dict())}\n"
             )
 
-    def _create_batch_spec_kwargs(self) -> dict[str, Any]:
+    def _create_batch_spec_kwargs(self) -> Dict[str, Any]:
         """Creates batch_spec_kwargs used to instantiate a SqlAlchemyDatasourceBatchSpec or RuntimeQueryBatchSpec
 
         This is called by get_batch to generate the batch.
@@ -834,7 +840,7 @@ class QueryAsset(_SQLAsset):
         return sa.select(sa.text(self.query.lstrip()[6:])).subquery()
 
     @override
-    def _create_batch_spec_kwargs(self) -> dict[str, Any]:
+    def _create_batch_spec_kwargs(self) -> Dict[str, Any]:
         return {
             "data_asset_name": self.name,
             "query": self.query,
@@ -858,6 +864,8 @@ class TableAsset(_SQLAsset):
     )
     schema_name: Optional[str] = None
 
+    _quote_character: Optional[str] = None
+
     @property
     def qualified_name(self) -> str:
         return f"{self.schema_name}.{self.table_name}" if self.schema_name else self.table_name
@@ -872,8 +880,7 @@ class TableAsset(_SQLAsset):
         return validated_table_name
 
     @pydantic.validator("table_name")
-    def _resolve_quoted_name(cls, table_name: str) -> str | quoted_name:
-        table_name_is_quoted: bool = cls._is_bracketed_by_quotes(table_name)
+    def _resolve_quoted_name(cls, table_name: str, values: Dict[str, Any]) -> str:
 
         from great_expectations.compatibility import sqlalchemy
 
@@ -881,18 +888,37 @@ class TableAsset(_SQLAsset):
             if isinstance(table_name, sqlalchemy.quoted_name):
                 return table_name
 
-            if table_name_is_quoted:
+            quote: bool = cls._is_bracketed_by_quotes(table_name)
+
+            if quote:
                 # https://docs.sqlalchemy.org/en/20/core/sqlelement.html#sqlalchemy.sql.expression.quoted_name.quote
                 # Remove the quotes and add them back using the sqlalchemy.quoted_name function
                 # TODO: We need to handle nested quotes
-                table_name = table_name.strip("'").strip('"')
+                values["_quote_character"] = table_name[0]
+                table_name_is_quoted = True
+                table_name = table_name.lstrip("".join(DEFAULT_INITIAL_QUOTE_CHARACTERS)).rstrip(
+                    "".join(DEFAULT_FINAL_QUOTE_CHARACTERS.values())
+                )
 
             return sqlalchemy.quoted_name(
                 value=table_name,
-                quote=table_name_is_quoted,
+                quote=quote,
             )
 
         return table_name
+
+    @override
+    def dict(self, **kwargs) -> Dict[str, Any]:
+        original_dict = super().dict(**kwargs)
+
+        # we need to ensure we retain the quotes when serializing quoted names
+        qc = self._quote_character
+        if qc is not None:
+            original_dict["table_name"] = (
+                f"{qc}{self.table_name}{DEFAULT_FINAL_QUOTE_CHARACTERS[qc]}"
+            )
+
+        return original_dict
 
     @override
     def test_connection(self) -> None:
@@ -914,8 +940,14 @@ class TableAsset(_SQLAsset):
         try:
             with engine.connect() as connection:
                 table = sa.table(self.table_name, schema=self.schema_name)
+
+                # sa.select(1, table).limit(1) produces query like this
+                # SELECT * FROM "SPECIAL_CHAR_([{!@#$%^&*_+|:;?/,.~``}])" LIMIT %(param_1)
+                # which checks for %. It finds % in our table name and and try to escape %^ which causes exception
+                # unsupported format character '^'
+
                 # don't need to fetch any data, just want to make sure the table is accessible
-                connection.execute(sa.select(1, table).limit(1))
+                connection.execute(f'SELECT 1 FROM {self.table_name} LIMIT 1')
         except Exception as query_error:
             LOGGER.info(f"{self.name} `.test_connection()` query failed: {query_error!r}")
             raise TestConnectionError(  # noqa: TRY003
@@ -929,10 +961,10 @@ class TableAsset(_SQLAsset):
 
         This can be used in a from clause for a query against this data.
         """
-        return sa.text(self.qualified_name)  # type: ignore[return-value]
+        return sa.table(self.table_name, schema=self.schema_name)
 
     @override
-    def _create_batch_spec_kwargs(self) -> dict[str, Any]:
+    def _create_batch_spec_kwargs(self) -> Dict[str, Any]:
         return {
             "type": "table",
             "data_asset_name": self.name,
@@ -942,7 +974,7 @@ class TableAsset(_SQLAsset):
         }
 
     @override
-    def _create_batch_spec(self, batch_spec_kwargs: dict) -> SqlAlchemyDatasourceBatchSpec:
+    def _create_batch_spec(self, batch_spec_kwargs: Dict) -> SqlAlchemyDatasourceBatchSpec:
         return SqlAlchemyDatasourceBatchSpec(**batch_spec_kwargs)
 
     @staticmethod
@@ -960,8 +992,8 @@ class TableAsset(_SQLAsset):
             True if the target string is bracketed by quotes.
         """
         return any(
-            target.startswith(quote) and target.endswith(quote)
-            for quote in DEFAULT_QUOTE_CHARACTERS
+            target.startswith(quote) and target.endswith(DEFAULT_FINAL_QUOTE_CHARACTERS[quote])
+            for quote in DEFAULT_INITIAL_QUOTE_CHARACTERS
         )
 
     @classmethod
@@ -975,7 +1007,7 @@ class TableAsset(_SQLAsset):
         Returns:
             The target string in lowercase if it is not bracketed by quotes.
         """
-        return to_lower_if_not_quoted(target, quote_characters=DEFAULT_QUOTE_CHARACTERS)
+        return to_lower_if_not_quoted(target, quote_characters=DEFAULT_INITIAL_QUOTE_CHARACTERS)
 
 
 def _warn_for_more_specific_datasource_type(connection_string: str) -> None:
@@ -986,7 +1018,7 @@ def _warn_for_more_specific_datasource_type(connection_string: str) -> None:
 
     connector: str = connection_string.split("://")[0].split("+")[0]
 
-    type_lookup_plus: dict[str, str] = {
+    type_lookup_plus: Dict[str, str] = {
         n: DataSourceManager.type_lookup[n].__name__
         for n in DataSourceManager.type_lookup.type_names()
     }
